@@ -1,0 +1,192 @@
+---
+title: "Predicting good exercise form from accelerometer data"
+author: "Derwin McGeary"
+date: "11/08/2015"
+output: html_document
+---
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+
+
+## Data 
+
+The first stage is to obtain and process the data we are going to use. Firstly we take the training set.
+```{r}
+library(downloader)
+library(caret)
+library(reshape2)
+
+grabme <- function(URL,FILE)  {if(!file.exists(FILE)) {
+  download(URL, FILE) }}
+
+sourceurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+grabme(sourceurl, "trainset.csv")
+datas <- read.csv("trainset.csv")
+```
+
+We are operating on a low-RAM, single-core system, so we reduce as many variables as we can. Firstly we get rid of Near Zero Variance columns as these are unlikely to have predictive value.
+
+```{r}
+# strip Near Zero Variance columns
+nzvcols <- nearZeroVar(datas)
+datas <- datas[,-nzvcols]
+```
+
+We partition the training data into training and validation subsets.
+```{r}
+# Partition data
+inTrain <- createDataPartition(y=datas$classe, p=0.75, list=F)
+training <- datas[inTrain,]
+validation <- datas[-inTrain,]
+```
+We should process our test data the same, and strip out the same columns
+```{r}
+testurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+grabme(testurl,"testset.csv")
+testing <- read.csv("testset.csv")
+
+# strip the *same* near zero columns out of testing
+testing <- testing[,-nzvcols]
+```
+A function to strip out columns with more than 10% zeroes. As computational power is limited we wish to keep only the most informative data.
+```{r}
+philtre <- function(datas) {
+  datas <- datas[sapply(datas, function(x) !any(is.na(x)))]
+  
+  zerotest <<- NULL
+  for(i in 1:length(datas))
+  {
+    zerotest <<- c(zerotest, nrow(datas[datas[,i] == 0,])/nrow(datas))
+  }
+  removecols <- colnames(datas[,which(zerotest >.10)])
+  datas[,removecols] <- list(NULL)
+  datas[datas == 0] <- NA
+  datas <- datas[complete.cases(datas),]
+  datas
+}
+
+training<-philtre(training)
+```
+## Feature selection and model building
+### Acceleration model
+We start by using only the the features with acceleration data, indicated by names starting with "accel" in the dataset.
+```{r}
+accset <- data.frame(training$classe,training[,grep("^accel", names(training))])
+names(accset)[names(accset)=="training.classe"] <- "classe"
+
+### the following line takes AGES (hours)on my machine
+### so we load("accelonly.RData") instead if possible
+if(!file.exists("accelmodel.RData")) 
+  {
+  system.time(accmodel <- train(accset$classe ~ ., data=accset, preProcess="pca"))
+  save(accmodel,file="accelmodel.RData")
+  } else {
+    load("accelmodel.RData")
+  }
+
+z <- confusionMatrix(validation$classe, predict(accmodel, validation))
+cm <- z$table
+
+ggplot(melt(cm),
+       aes(Reference,
+           Prediction, 
+           fill=value, 
+           label=value)) + 
+  geom_tile() + 
+  geom_text() + ggtitle("Accel-only pca model")
+print(accmodel)
+##################### End of accmodel ###########
+```
+### Gyroscope-only model
+This model concentrates only on the gyroscope measurements, indicated by "gyro" in the column names of the dataset.
+```{r}
+gyroset <- data.frame(training$classe,training[,grep("^gyro", names(training))])
+names(gyroset)[names(gyroset)=="training.classe"] <- "classe"
+
+if(!file.exists("gyromodel.RData")) { 
+  system.time(gyromodel <- train(gyroset$classe ~ ., data=gyroset, preProcess="pca"))
+  save(gyromodel,file="gyromodel.RData")
+  } else {
+    load("gyromodel.RData")    
+  }
+
+z <- confusionMatrix(validation$classe, predict(gyromodel, validation))
+cm <- z$table
+
+ggplot(melt(cm),
+       aes(Reference,
+           Prediction, 
+           fill=value, 
+           label=value)) + 
+  geom_tile() + 
+  geom_text() + ggtitle("gyro-only pca model")
+print(gyromodel)
+```
+### Dumbell model
+Finally this model was chosen because it may be practical to use only sensors which can remain attached to the equipment, giving the user more freedom. It uses only measurements with "dumbbell" in the name, indicating that the sensors were attached to the dumbbell.
+```{r}
+dumbset <- data.frame(training$classe,training[,grep("dumbbell", names(training))])
+names(dumbset)[names(dumbset)=="training.classe"] <- "classe"
+
+if(!file.exists("gyromodel.RData")) { 
+  system.time(dumbmodel <- train(dumbset$classe ~ ., data=dumbset, preProcess="pca"))
+  save(dumbmodel,file="dumbmodel.RData")
+} else {
+  load("dumbmodel.RData")    
+}
+
+z <- confusionMatrix(validation$classe, predict(dumbmodel, validation))
+cm <- z$table
+
+ggplot(melt(cm),
+       aes(Reference,
+           Prediction, 
+           fill=value, 
+           label=value)) + 
+  geom_tile() + 
+  geom_text() + ggtitle("dumb-only pca model")
+print(dumbmodel)
+```
+
+## Combining models
+As none of these were particularly good individually, I decided to try to increase the accuracy by using a simple voting model to combine the three. The acceleration model is the best, so we use the prediction from that unless the other two models both predict the same thing, in which case we take that value instead.
+
+```{r}
+total <- data.frame(acc=predict(accmodel,validation),gyro=predict(gyromodel,validation),dumb=predict(dumbmodel,validation),actual=validation$classe,voted=validation$classe)
+total$voted <- ifelse(total$dumb==total$gyro,as.character(total$gyro),as.character(total$acc))
+z <- confusionMatrix(total$actual,total$voted)
+cm <- z$table
+ggplot(melt(cm),
+aes(Reference,
+Prediction,
+fill=value,
+label=value)) +
+geom_tile() +
+geom_text() + ggtitle("Voting model")
+print(estimated_accuracy <- sum(total$voted==total$actual)/length(total$voted)*100)
+```
+This gives an estimated accuracy on the validation set of {r c(estimated_accuracy,"%")} which is an improvement on the acceleration model.
+
+# Appendix
+## Results submission
+```{r}
+results <- data.frame(acc=predict(accmodel,testing),
+                      gyro=predict(gyromodel,testing),
+                      dumb=predict(dumbmodel,testing),
+                      voted=predict(dumbmodel,testing))
+
+results$voted <- ifelse(results$dumb==results$gyro,
+                        as.character(results$gyro),
+                        as.character(results$acc))
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+  }
+pml_write_files(results$voted)
+```

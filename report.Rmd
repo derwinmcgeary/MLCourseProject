@@ -6,9 +6,7 @@ output: html_document
 ---
 ## Background
 
-Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
-
-
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we want to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
 
 ## Data 
 
@@ -50,7 +48,7 @@ testing <- read.csv("testset.csv")
 # strip the *same* near zero columns out of testing
 testing <- testing[,-nzvcols]
 ```
-A function to strip out columns with more than 10% zeroes. As computational power is limited we wish to keep only the most informative data.
+A function to strip out columns with more than 10% zeros. As computational power is limited we wish to keep only the most informative data.
 ```{r}
 philtre <- function(datas) {
   datas <- datas[sapply(datas, function(x) !any(is.na(x)))]
@@ -71,7 +69,7 @@ training<-philtre(training)
 ```
 ## Feature selection and model building
 ### Acceleration model
-We start by using only the the features with acceleration data, indicated by names starting with "accel" in the dataset.
+We start by using only the the features with acceleration data, indicated by names starting with "accel" in the dataset. We use a RandomForest algorithm and we check for out of sample (OOS) error using the validation data.
 ```{r}
 accset <- data.frame(training$classe,training[,grep("^accel", names(training))])
 names(accset)[names(accset)=="training.classe"] <- "classe"
@@ -100,7 +98,7 @@ print(accmodel)
 ##################### End of accmodel ###########
 ```
 ### Gyroscope-only model
-This model concentrates only on the gyroscope measurements, indicated by "gyro" in the column names of the dataset.
+This model concentrates only on the gyroscope measurements, indicated by "gyro" in the column names of the dataset. As before, we use RandomForest and estimate our OOS error with the validation data.
 ```{r}
 gyroset <- data.frame(training$classe,training[,grep("^gyro", names(training))])
 names(gyroset)[names(gyroset)=="training.classe"] <- "classe"
@@ -151,7 +149,7 @@ print(dumbmodel)
 ```
 
 ## Combining models
-As none of these were particularly good individually, I decided to try to increase the accuracy by using a simple voting model to combine the three. The acceleration model is the best, so we use the prediction from that unless the other two models both predict the same thing, in which case we take that value instead.
+As none of these were particularly good individually, I decided to try to increase the accuracy by using a simple voting model to combine the three. The acceleration model is the best, so we use the prediction from that unless the other two models both predict the same thing, in which case we take that value instead. This is a weighted majority-vote model.
 
 ```{r}
 total <- data.frame(acc=predict(accmodel,validation),gyro=predict(gyromodel,validation),dumb=predict(dumbmodel,validation),actual=validation$classe,voted=validation$classe)
@@ -167,7 +165,7 @@ geom_tile() +
 geom_text() + ggtitle("Voting model")
 print(estimated_accuracy <- sum(total$voted==total$actual)/length(total$voted)*100)
 ```
-This gives an estimated accuracy on the validation set of {r c(estimated_accuracy,"%")} which is an improvement on the acceleration model.
+This gives an estimated accuracy on the validation set of `r paste(round(estimated_accuracy),"%")` which is an improvement on the acceleration model.
 
 # Appendix
 ## Results submission
